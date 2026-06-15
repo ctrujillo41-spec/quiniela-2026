@@ -78,6 +78,7 @@
   .deadline-input{height:32px;padding:0 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;background:#fff}
   .match-locked{opacity:.6;background:#f5f5f5 !important;border-color:#ddd !important}
   .lock-icon{font-size:11px;color:var(--muted);margin-left:4px}
+  .announce-area{width:100%;min-height:90px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:Arial,sans-serif;resize:vertical;background:#fff}
   @media(max-width:480px){h1{font-size:18px}.team{font-size:12px}.score{width:34px;height:30px;font-size:14px}}
 </style>
 </head>
@@ -129,7 +130,7 @@ const JORNADAS=[
 ];
 
 let mode='home',currentTab='A',adminUnlocked=false,editingName='';
-let config={results:{},champion:'',closed:false,deadlines:{}};
+let config={results:{},champion:'',closed:false,deadlines:{},announcement:''};
 let participants={};
 
 // ── DB ────────────────────────────────────────────────────────
@@ -142,20 +143,21 @@ async function loadAll(){
     results:cfgRes.data.results||{},
     champion:cfgRes.data.champion||'',
     closed:cfgRes.data.closed||false,
-    deadlines:cfgRes.data.deadlines||{}
+    deadlines:cfgRes.data.deadlines||{},
+    announcement:cfgRes.data.announcement||''
   };
   participants={};
-  if(partRes.data) partRes.data.forEach(p=>{participants[p.name]={scores:p.scores||{},champion:p.champion||''};});
+  if(partRes.data) partRes.data.forEach(p=>{participants[p.name]={scores:p.scores||{},champion:p.champion||'',pin:p.pin||''};});
 }
 
 async function saveParticipant(name){
   const p=participants[name];
-  const{error}=await sb.from('quiniela_participants').upsert({name,scores:p.scores,champion:p.champion,updated_at:new Date().toISOString()},{onConflict:'name'});
+  const{error}=await sb.from('quiniela_participants').upsert({name,scores:p.scores,champion:p.champion,pin:p.pin||'',updated_at:new Date().toISOString()},{onConflict:'name'});
   return !error;
 }
 
 async function saveConfig(){
-  const{error}=await sb.from('quiniela_config').update({results:config.results,champion:config.champion,closed:config.closed,deadlines:config.deadlines}).eq('id',1);
+  const{error}=await sb.from('quiniela_config').update({results:config.results,champion:config.champion,closed:config.closed,deadlines:config.deadlines,announcement:config.announcement}).eq('id',1);
   return !error;
 }
 
@@ -252,7 +254,9 @@ function renderHome(){
     jornadaInfo+=`<div class="info-row"><span>${j.label}</span>${jornadaBadge(i)}</div>`;
   });
 
-  return`<div class="card">
+  const ann=(config.announcement||'').trim();
+  return`${ann?`<div class="card" style="border-left:4px solid var(--group)"><h3>📢 Aviso del organizador</h3><p style="font-size:13px;white-space:pre-wrap;line-height:1.6">${ann.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p></div>`:''}
+  <div class="card">
     <h3>Estado de las jornadas</h3>
     ${jornadaInfo}
   </div>
@@ -260,8 +264,13 @@ function renderHome(){
     <h3>¿Cómo quieres participar?</h3>
     <div class="name-row">
       <label>Tu nombre:</label>
-      <input id="home-name" type="text" placeholder="Ej. Carlos, La Jefa..." onkeydown="if(event.key==='Enter')goFill()">
+      <input id="home-name" type="text" placeholder="Ej. Carlos, La Jefa..." onkeydown="if(event.key==='Enter')document.getElementById('home-pin').focus()">
     </div>
+    <div class="name-row" style="margin-bottom:0">
+      <label>Tu PIN:</label>
+      <input id="home-pin" type="password" maxlength="8" placeholder="••••" onkeydown="if(event.key==='Enter')goFill()">
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:6px 0 8px">Si es tu primera vez, escribe el PIN que quieras usar — quedará guardado para siempre.</p>
     <button class="btn btn-primary btn-full" onclick="goFill()">📝 Llenar mi quiniela</button>
   </div>
   <div class="card">
@@ -275,11 +284,33 @@ function renderHome(){
 
 async function goFill(){
   const name=document.getElementById('home-name')?.value?.trim();
+  const pin=document.getElementById('home-pin')?.value?.trim();
   if(!name){showMsg('Escribe tu nombre primero','warn');return;}
-  // Check if ALL jornadas are closed
-  const allClosed=JORNADAS.every((_,i)=>jornadaStatus(i)==='closed');
-  if(allClosed&&!participants[name]){showMsg('La quiniela está cerrada, ya no se aceptan nuevos pronósticos','warn');return;}
-  if(!participants[name])participants[name]={scores:{},champion:''};
+  if(!pin){showMsg('Escribe tu PIN','warn');return;}
+  if(pin.length<4){showMsg('El PIN debe tener al menos 4 caracteres','warn');return;}
+
+  const existing=participants[name];
+
+  if(existing){
+    // Participant exists — validate PIN
+    if(existing.pin&&existing.pin!==pin){
+      showMsg('PIN incorrecto. Inténtalo de nuevo.','error');
+      return;
+    }
+    // First time setting PIN
+    if(!existing.pin){
+      existing.pin=pin;
+      await saveParticipant(name);
+    }
+  } else {
+    // New participant — check if all jornadas closed
+    const allClosed=JORNADAS.every((_,i)=>jornadaStatus(i)==='closed');
+    if(allClosed){showMsg('La quiniela está cerrada, ya no se aceptan nuevos pronósticos','warn');return;}
+    // Register with PIN
+    participants[name]={scores:{},champion:'',pin};
+    await saveParticipant(name);
+  }
+
   editingName=name;
   setMode('fill');
 }
@@ -432,6 +463,13 @@ function renderAdmin(){
   </div>
 
   <div class="card">
+    <h3>📢 Aviso para los participantes</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Este texto aparece en la pantalla de inicio para todos. Déjalo vacío para no mostrar nada.</p>
+    <textarea class="announce-area" id="announce-txt" placeholder="Ej: La jornada 2 cierra el viernes a las 9am, ¡no se les vaya a pasar!">${(config.announcement||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
+    <button class="btn btn-primary btn-full" id="save-ann-btn" onclick="saveAnnouncement()">💾 Publicar aviso</button>
+  </div>
+
+  <div class="card">
     <h3>⏰ Control de jornadas</h3>
     <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Cierra cada jornada manualmente o programa el cierre automático por fecha y hora.</p>
     ${jornadasHtml}
@@ -452,8 +490,9 @@ function renderAdmin(){
         <div class="lb-row">
           <div style="flex:1">
             <div class="lb-name">${name}</div>
-            <div class="lb-detail">${countFilled(p.scores)}/36 partidos · Campeón: ${p.champion||'–'}</div>
+            <div class="lb-detail">${countFilled(p.scores)}/36 partidos · Campeón: ${p.champion||'–'} · PIN: ${p.pin?'✅ configurado':'⚠️ sin PIN'}</div>
           </div>
+          <button class="btn btn-warn" style="padding:4px 8px;font-size:11px;margin-right:4px" onclick="resetPin('${esc(name)}')">🔑 PIN</button>
           <button class="btn btn-danger" style="padding:4px 10px;font-size:11px" onclick="deletePart('${esc(name)}')">Borrar</button>
         </div>`).join('')}
   </div>
@@ -494,6 +533,16 @@ function renderAdmin(){
 }
 
 // ── Jornada admin actions ──────────────────────────────────────
+async function saveAnnouncement(){
+  const btn=document.getElementById('save-ann-btn');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Publicando...';}
+  config.announcement=document.getElementById('announce-txt')?.value||'';
+  const ok=await saveConfig();
+  if(ok)showMsg('✅ Aviso publicado','success');
+  else showMsg('❌ Error al guardar','error');
+  if(btn){btn.disabled=false;btn.innerHTML='💾 Publicar aviso';}
+}
+
 async function setDeadline(jIdx,val){
   if(!config.deadlines[jIdx])config.deadlines[jIdx]={};
   config.deadlines[jIdx].datetime=val||null;
@@ -537,6 +586,15 @@ async function saveRealResults(){
   if(ok)showMsg('✅ Resultados guardados','success');
   else showMsg('❌ Error al guardar','error');
   if(btn){btn.disabled=false;btn.innerHTML='💾 Guardar resultados';}
+}
+
+async function resetPin(name){
+  if(!confirm(`¿Reiniciar el PIN de ${name}?\nLa próxima vez que entre podrá crear uno nuevo.`))return;
+  participants[name].pin='';
+  const ok=await saveParticipant(name);
+  if(ok)showMsg(`🔑 PIN de ${name} reiniciado`,'info');
+  else showMsg('❌ Error al reiniciar PIN','error');
+  render();
 }
 
 async function deletePart(name){
