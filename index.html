@@ -79,6 +79,19 @@
   .match-locked{opacity:.6;background:#f5f5f5 !important;border-color:#ddd !important}
   .lock-icon{font-size:11px;color:var(--muted);margin-left:4px}
   .announce-area{width:100%;min-height:90px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:Arial,sans-serif;resize:vertical;background:#fff}
+  .res-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .res-table{border-collapse:collapse;min-width:100%;font-size:12px}
+  .res-table th{background:var(--header);color:#fff;padding:8px 10px;white-space:nowrap;text-align:center;position:sticky;top:0}
+  .res-table th.match-col{text-align:left;min-width:160px;position:sticky;left:0;z-index:2;background:var(--header)}
+  .res-table td{padding:7px 10px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap}
+  .res-table td.match-col{text-align:left;background:var(--alt1);position:sticky;left:0;z-index:1;font-weight:600;min-width:160px}
+  .res-table tr:nth-child(even) td{background:#f8fbff}
+  .res-table tr:nth-child(even) td.match-col{background:#dce8f5}
+  .res-score{font-weight:700;color:var(--group)}
+  .res-empty{color:#ccc}
+  .check-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .check-row:last-child{border:none}
+  .check-row input[type=checkbox]{width:18px;height:18px;cursor:pointer;accent-color:var(--group)}
   @media(max-width:480px){h1{font-size:18px}.team{font-size:12px}.score{width:34px;height:30px;font-size:14px}}
 </style>
 </head>
@@ -90,6 +103,7 @@
 <div class="mode-bar">
   <button class="mode-btn active" id="mode-home" onclick="setMode('home')">🏠 Inicio</button>
   <button class="mode-btn" id="mode-fill" onclick="setMode('fill')">📝 Mi quiniela</button>
+  <button class="mode-btn" id="mode-resultados" onclick="setMode('resultados')">📊 Resultados</button>
   <button class="mode-btn" id="mode-ranking" onclick="setMode('ranking')">🏆 Ranking</button>
   <button class="mode-btn" id="mode-admin" onclick="setMode('admin-login')">🔒 Admin</button>
 </div>
@@ -130,7 +144,7 @@ const JORNADAS=[
 ];
 
 let mode='home',currentTab='A',adminUnlocked=false,editingName='';
-let config={results:{},champion:'',closed:false,deadlines:{},announcement:''};
+let config={results:{},champion:'',closed:false,deadlines:{},announcement:'',visibleMatches:{}};
 let participants={};
 
 // ── DB ────────────────────────────────────────────────────────
@@ -144,7 +158,8 @@ async function loadAll(){
     champion:cfgRes.data.champion||'',
     closed:cfgRes.data.closed||false,
     deadlines:cfgRes.data.deadlines||{},
-    announcement:cfgRes.data.announcement||''
+    announcement:cfgRes.data.announcement||'',
+    visibleMatches:cfgRes.data.visible_matches||{}
   };
   participants={};
   if(partRes.data) partRes.data.forEach(p=>{participants[p.name]={scores:p.scores||{},champion:p.champion||'',pin:p.pin||''};});
@@ -157,7 +172,7 @@ async function saveParticipant(name){
 }
 
 async function saveConfig(){
-  const{error}=await sb.from('quiniela_config').update({results:config.results,champion:config.champion,closed:config.closed,deadlines:config.deadlines,announcement:config.announcement}).eq('id',1);
+  const{error}=await sb.from('quiniela_config').update({results:config.results,champion:config.champion,closed:config.closed,deadlines:config.deadlines,announcement:config.announcement,visible_matches:config.visibleMatches}).eq('id',1);
   return !error;
 }
 
@@ -235,7 +250,7 @@ function showMsg(text,type='info',ms=2800){
 
 function setMode(m){
   mode=m;
-  ['home','fill','ranking','admin','admin-login'].forEach(x=>{
+  ['home','fill','resultados','ranking','admin','admin-login'].forEach(x=>{
     const el=document.getElementById('mode-'+x);
     if(el)el.classList.toggle('active',x===m||(x==='admin'&&(m==='admin-login'||m==='admin')));
   });
@@ -408,6 +423,59 @@ async function renderRanking(){
   return html;
 }
 
+async function renderResultados(){
+  document.getElementById('root').innerHTML=renderLoading();
+  await loadAll();
+  const names=Object.keys(participants);
+  const visible=Object.entries(config.visibleMatches).filter(([,v])=>v).map(([k])=>k);
+
+  if(visible.length===0){
+    return`<div class="card" style="text-align:center;padding:2rem">
+      <p style="font-size:14px;color:var(--muted)">⏳ El administrador aún no ha habilitado ningún partido para mostrar.</p>
+    </div>`;
+  }
+
+  // Build rows: visible match keys in order
+  const rows=[];
+  Object.keys(GRUPOS).forEach(g=>{
+    GRUPOS[g].matches.forEach((m,i)=>{
+      const k=mk(g,i);
+      if(config.visibleMatches[k]) rows.push({k,g,i,label:`${m[0]} vs ${m[1]}`});
+    });
+  });
+
+  if(rows.length===0) return`<div class="card"><p style="font-size:13px;color:var(--muted);text-align:center;padding:1rem">No hay partidos para mostrar.</p></div>`;
+
+  let html=`<div class="card">
+    <h3>📊 Pronósticos de todos</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Partidos habilitados por el administrador · ${names.length} participante(s)</p>
+    <div class="res-table-wrap">
+    <table class="res-table">
+      <thead><tr>
+        <th class="match-col">Partido</th>
+        ${names.map(n=>`<th>${n}</th>`).join('')}
+      </tr></thead>
+      <tbody>`;
+
+  rows.forEach(({k,label})=>{
+    html+=`<tr><td class="match-col">⚽ ${label}</td>`;
+    names.forEach(name=>{
+      const s=participants[name]?.scores[k];
+      if(s&&s.a!==''&&s.b!==''){
+        html+=`<td class="res-score">${s.a} – ${s.b}</td>`;
+      } else {
+        html+=`<td class="res-empty">–</td>`;
+      }
+    });
+    html+=`</tr>`;
+  });
+
+  html+=`</tbody></table></div>
+    <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="document.getElementById('root').innerHTML='';renderResultados().then(h=>{if(h)document.getElementById('root').innerHTML=h;})">🔄 Actualizar</button>
+  </div>`;
+  return html;
+}
+
 function renderAdminLogin(){
   return`<div class="card pin-card">
     <h3 style="text-align:center;margin-bottom:14px">🔒 Acceso de administrador</h3>
@@ -460,6 +528,25 @@ function renderAdmin(){
     <div class="info-row"><span>Resultados capturados</span><strong>${totalReal}/36</strong></div>
     <div class="info-row"><span>Campeón real</span><strong>${config.champion||'–'}</strong></div>
     <button class="btn btn-primary btn-full" onclick="reloadAdmin()">🔄 Recargar datos</button>
+  </div>
+
+  <div class="card">
+    <h3>📊 Partidos visibles en "Resultados"</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Selecciona qué partidos quieres mostrar a todos los participantes en la pestaña Resultados.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="toggleAllMatches(true)">✅ Marcar todos</button>
+      <button class="btn" style="padding:6px 12px;font-size:12px;background:#eee" onclick="toggleAllMatches(false)">☐ Desmarcar todos</button>
+    </div>
+    ${Object.keys(GRUPOS).map(g=>`
+      <div style="font-size:11px;font-weight:700;color:var(--group);text-transform:uppercase;margin:10px 0 4px">Grupo ${g}</div>
+      ${GRUPOS[g].matches.map((m,i)=>{
+        const k=mk(g,i);
+        const checked=config.visibleMatches[k]?'checked':'';
+        return`<div class="check-row">
+          <input type="checkbox" id="vm_${k}" ${checked} onchange="toggleMatch('${k}',this.checked)">
+          <label for="vm_${k}" style="cursor:pointer">${m[0]} vs ${m[1]}</label>
+        </div>`;
+      }).join('')}`).join('')}
   </div>
 
   <div class="card">
@@ -533,6 +620,19 @@ function renderAdmin(){
 }
 
 // ── Jornada admin actions ──────────────────────────────────────
+async function toggleMatch(k,val){
+  config.visibleMatches[k]=val;
+  await saveConfig();
+}
+
+async function toggleAllMatches(val){
+  Object.keys(GRUPOS).forEach(g=>{
+    GRUPOS[g].matches.forEach((_,i)=>{config.visibleMatches[mk(g,i)]=val;});
+  });
+  await saveConfig();
+  render();
+}
+
 async function saveAnnouncement(){
   const btn=document.getElementById('save-ann-btn');
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Publicando...';}
@@ -653,6 +753,7 @@ function render(){
   const el=document.getElementById('root');
   if(mode==='home')el.innerHTML=renderHome();
   else if(mode==='fill')el.innerHTML=renderFill();
+  else if(mode==='resultados'){el.innerHTML=renderLoading();renderResultados().then(h=>el.innerHTML=h);}
   else if(mode==='ranking'){el.innerHTML=renderLoading();renderRanking().then(h=>el.innerHTML=h);}
   else if(mode==='admin-login')el.innerHTML=renderAdminLogin();
   else if(mode==='admin'&&adminUnlocked)el.innerHTML=renderAdmin();
