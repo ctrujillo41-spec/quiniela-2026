@@ -304,28 +304,24 @@ async function goFill(){
   if(!pin){showMsg('Escribe tu PIN','warn');return;}
   if(pin.length<4){showMsg('El PIN debe tener al menos 4 caracteres','warn');return;}
 
-  // Siempre consultar Supabase directamente para evitar datos en memoria desactualizados
-  const{data,error}=await sb.from('quiniela_participants').select('*').eq('name',name).maybeSingle();
-  if(error){showMsg('❌ Error de conexión. Intenta de nuevo.','error');return;}
+  const existing=participants[name];
 
-  if(data){
-    // Participante existe en BD — cargar datos frescos en memoria
-    participants[name]={scores:data.scores||{},champion:data.champion||'',pin:data.pin||''};
-    // Validar PIN
-    if(data.pin&&data.pin!==pin){
+  if(existing){
+    // Participant exists — validate PIN
+    if(existing.pin&&existing.pin!==pin){
       showMsg('PIN incorrecto. Inténtalo de nuevo.','error');
       return;
     }
-    // Primera vez configurando PIN
-    if(!data.pin){
-      participants[name].pin=pin;
+    // First time setting PIN
+    if(!existing.pin){
+      existing.pin=pin;
       await saveParticipant(name);
-      showMsg('✅ PIN registrado','success',1500);
     }
   } else {
-    // Participante nuevo
+    // New participant — check if all jornadas closed
     const allClosed=JORNADAS.every((_,i)=>jornadaStatus(i)==='closed');
     if(allClosed){showMsg('La quiniela está cerrada, ya no se aceptan nuevos pronósticos','warn');return;}
+    // Register with PIN
     participants[name]={scores:{},champion:'',pin};
     await saveParticipant(name);
   }
