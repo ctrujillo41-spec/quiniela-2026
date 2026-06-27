@@ -287,6 +287,32 @@ function isRoundLocked(rkey){
   return false;
 }
 
+function isMatchLocked_bracket(mid){
+  // Check per-match deadline first, then fall back to round deadline
+  const md=bracket.deadlines[mid];
+  if(md){
+    if(md.closed===true)return true;
+    if(md.datetime&&new Date()>=new Date(md.datetime))return true;
+  }
+  // Also check round-level lock
+  const rkey=mid.split('_')[0];
+  return isRoundLocked(rkey);
+}
+
+function matchDeadlineBadge(mid){
+  const d=bracket.deadlines[mid]||{};
+  const rkey=mid.split('_')[0];
+  const roundLocked=isRoundLocked(rkey);
+  if(d.closed===true||roundLocked)return`<span class="badge badge-closed" style="font-size:10px">🔒 Cerrado</span>`;
+  if(d.datetime&&new Date()>=new Date(d.datetime))return`<span class="badge badge-closed" style="font-size:10px">🔒 Cerrado</span>`;
+  if(d.datetime){
+    const dt=new Date(d.datetime);
+    const fmt=dt.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})+' '+dt.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    return`<span class="badge badge-auto" style="font-size:10px">⏰ ${fmt}</span>`;
+  }
+  return`<span class="badge badge-open" style="font-size:10px">✅ Abierto</span>`;
+}
+
 function roundBadge(rkey){
   const d=bracket.deadlines[rkey]||{};
   if(d.closed===true)return`<span class="badge badge-closed">🔒 Cerrada</span>`;
@@ -537,18 +563,28 @@ async function renderRanking(){
 }
 
 async function renderResultados(){
-  // Reload fresh data from Supabase
   await loadAll();
-
   const names=Object.keys(participants);
 
-  // Build visible rows in grupo/match order
+  // Grupo phase visible rows
   const rows=[];
   Object.keys(GRUPOS).forEach(g=>{
     GRUPOS[g].matches.forEach((m,i)=>{
       const k=mk(g,i);
       if(config.visibleMatches&&config.visibleMatches[k]===true)
-        rows.push({k,g,i,label:`G${g}: ${m[0]} vs ${m[1]}`});
+        rows.push({k,label:`G${g}: ${m[0]} vs ${m[1]}`,type:'grupo'});
+    });
+  });
+
+  // Bracket phase visible rows
+  ROUNDS.forEach(r=>{
+    ROUND_MATCHES[r.key].forEach((mid,i)=>{
+      if(config.visibleMatches&&config.visibleMatches[mid]===true){
+        const m=getMatch(mid);
+        const t1=m.t1||'Por definir';
+        const t2=m.t2||'Por definir';
+        rows.push({k:mid,label:`${r.label} P${i+1}: ${t1} vs ${t2}`,type:'bracket'});
+      }
     });
   });
 
@@ -557,7 +593,6 @@ async function renderResultados(){
       <p style="font-size:14px;color:var(--muted)">⏳ El administrador aún no ha habilitado ningún partido para mostrar.</p>
     </div>`;
   }
-
   if(names.length===0){
     return`<div class="card"><p style="font-size:13px;color:var(--muted);text-align:center;padding:1rem">Nadie ha llenado su quiniela aún.</p></div>`;
   }
@@ -573,14 +608,21 @@ async function renderResultados(){
       </tr></thead>
       <tbody>`;
 
-  rows.forEach(({k,label})=>{
+  rows.forEach(({k,label,type})=>{
     html+=`<tr><td class="match-col">${label}</td>`;
     names.forEach(name=>{
-      const s=participants[name]?.scores[k];
-      if(s&&s.a!==''&&s.b!==''){
-        html+=`<td class="res-score">${s.a} – ${s.b}</td>`;
-      }else{
-        html+=`<td class="res-empty">–</td>`;
+      const p=participants[name];
+      if(type==='grupo'){
+        const s=p?.scores[k];
+        html+=s&&s.a!==''&&s.b!==''?`<td class="res-score">${s.a} – ${s.b}</td>`:`<td class="res-empty">–</td>`;
+      } else {
+        const bp=p?.bpreds&&p.bpreds[k];
+        if(bp&&bp.s1!==''&&bp.s2!==''){
+          const winner=bp.winner?` <span style="font-size:10px;color:var(--green)">▲${bp.winner}</span>`:'';
+          html+=`<td class="res-score">${bp.s1} – ${bp.s2}${winner}</td>`;
+        } else {
+          html+=`<td class="res-empty">–</td>`;
+        }
       }
     });
     html+=`</tr>`;
@@ -592,8 +634,9 @@ async function renderResultados(){
   return html;
 }
 
-function bracketMatchCard(mid,i,locked){
+function bracketMatchCard(mid,i,_roundLocked){
   const m=getMatch(mid);
+  const locked=isMatchLocked_bracket(mid);
   const t1=m.t1||'Por definir';
   const t2=m.t2||'Por definir';
   const tbd1=!m.t1,tbd2=!m.t2;
@@ -714,22 +757,26 @@ async function renderBracket(){
       const m=getMatch(mid);
       if(!m.t1&&!m.t2)return;
       anyMatch=true;
+      const matchLocked=isMatchLocked_bracket(mid);
       const pred=p.bpreds[mid]||{s1:'',s2:'',winner:''};
       const t1=m.t1||'Equipo 1';
       const t2=m.t2||'Equipo 2';
       html+=`<div class="pred-match">
-        <div class="pred-match-title">P${i+1}: ${t1} vs ${t2}</div>
+        <div class="pred-match-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>P${i+1}: ${t1} vs ${t2}</span>
+          ${matchDeadlineBadge(mid)}
+        </div>
         <div class="pred-row">
           <span class="pred-team right">${t1}</span>
-          <input class="pred-score" type="number" min="0" max="99" value="${pred.s1}" ${locked?'disabled':''} oninput="setBP('${mid}','s1',this.value)">
+          <input class="pred-score" type="number" min="0" max="99" value="${pred.s1}" ${matchLocked?'disabled':''} oninput="setBP('${mid}','s1',this.value)">
           <span class="vs">–</span>
-          <input class="pred-score" type="number" min="0" max="99" value="${pred.s2}" ${locked?'disabled':''} oninput="setBP('${mid}','s2',this.value)">
+          <input class="pred-score" type="number" min="0" max="99" value="${pred.s2}" ${matchLocked?'disabled':''} oninput="setBP('${mid}','s2',this.value)">
           <span class="pred-team">${t2}</span>
         </div>
         <div class="pred-winner-label">¿Quién avanza?</div>
         <div class="pred-winner-grid">
-          <button class="pred-winner-btn ${pred.winner===t1?'selected':''}" ${locked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t1)}')">${t1}</button>
-          <button class="pred-winner-btn ${pred.winner===t2?'selected':''}" ${locked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t2)}')">${t2}</button>
+          <button class="pred-winner-btn ${pred.winner===t1?'selected':''}" ${matchLocked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t1)}')">${t1}</button>
+          <button class="pred-winner-btn ${pred.winner===t2?'selected':''}" ${matchLocked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t2)}')">${t2}</button>
         </div>
       </div>`;
     });
@@ -828,8 +875,9 @@ function renderAdmin(){
       <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="toggleAllMatches(true)">✅ Marcar todos</button>
       <button class="btn" style="padding:6px 12px;font-size:12px;background:#eee" onclick="toggleAllMatches(false)">☐ Desmarcar todos</button>
     </div>
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:8px 0 6px;letter-spacing:.05em">— Fase de Grupos —</div>
     ${Object.keys(GRUPOS).map(g=>`
-      <div style="font-size:11px;font-weight:700;color:var(--group);text-transform:uppercase;margin:10px 0 4px">Grupo ${g}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--group);text-transform:uppercase;margin:8px 0 4px">Grupo ${g}</div>
       ${GRUPOS[g].matches.map((m,i)=>{
         const k=mk(g,i);
         const checked=config.visibleMatches[k]?'checked':'';
@@ -838,6 +886,24 @@ function renderAdmin(){
           <label for="vm_${k}" style="cursor:pointer">${m[0]} vs ${m[1]}</label>
         </div>`;
       }).join('')}`).join('')}
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:14px 0 6px;letter-spacing:.05em">— Fase Final —</div>
+    ${ROUNDS.map(r=>{
+      const mids=ROUND_MATCHES[r.key];
+      const anyDefined=mids.some(mid=>bracket.rounds[mid]&&(bracket.rounds[mid].t1||bracket.rounds[mid].t2));
+      if(!anyDefined)return`<div style="font-size:11px;color:var(--muted);margin:4px 0 8px">📋 ${r.label} — sin equipos definidos aún</div>`;
+      return`<div style="font-size:11px;font-weight:700;color:var(--group);text-transform:uppercase;margin:8px 0 4px">${r.label}</div>
+      ${mids.map((mid,i)=>{
+        const m=getMatch(mid);
+        if(!m.t1&&!m.t2)return'';
+        const checked=config.visibleMatches[mid]?'checked':'';
+        const t1=m.t1||'Por definir';
+        const t2=m.t2||'Por definir';
+        return`<div class="check-row">
+          <input type="checkbox" id="vm_${mid}" ${checked} onchange="toggleMatch('${mid}',this.checked)">
+          <label for="vm_${mid}" style="cursor:pointer">P${i+1}: ${t1} vs ${t2}</label>
+        </div>`;
+      }).join('')}`;
+    }).join('')}
   </div>
 
   <div class="card">
@@ -867,18 +933,31 @@ function renderAdmin(){
 
   mids.forEach((mid,i)=>{
     const m=getMatch(mid);
+    const md=bracket.deadlines[mid]||{};
+    const mdtVal=md.datetime?new Date(md.datetime).toISOString().slice(0,16):'';
+    const matchLocked=isMatchLocked_bracket(mid);
     html+=`<div class="admin-bracket-match">
-      <h4>Partido ${i+1}</h4>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:4px">
+        <h4 style="margin:0">Partido ${i+1}</h4>
+        ${matchDeadlineBadge(mid)}
+      </div>
       <div style="display:grid;grid-template-columns:1fr auto auto 1fr;gap:6px;align-items:center;margin-bottom:6px">
         <input class="admin-bracket-team" type="text" placeholder="Equipo 1" value="${m.t1||''}" onchange="setBracketTeam('${mid}','t1',this.value)">
         <input style="width:34px;height:30px;text-align:center;font-size:13px;font-weight:700;border:2px solid #8B0000;border-radius:6px;color:#8B0000;background:#FFE5E5" type="number" min="0" max="99" placeholder="G" value="${m.s1!==undefined&&m.s1!==''?m.s1:''}" onchange="setBracketScore('${mid}','s1',this.value)">
         <input style="width:34px;height:30px;text-align:center;font-size:13px;font-weight:700;border:2px solid #8B0000;border-radius:6px;color:#8B0000;background:#FFE5E5" type="number" min="0" max="99" placeholder="G" value="${m.s2!==undefined&&m.s2!==''?m.s2:''}" onchange="setBracketScore('${mid}','s2',this.value)">
         <input class="admin-bracket-team" type="text" placeholder="Equipo 2" value="${m.t2||''}" onchange="setBracketTeam('${mid}','t2',this.value)">
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <span style="font-size:11px;color:var(--muted)">Ganador:</span>
         ${m.t1?`<button class="pred-winner-btn ${m.winner===m.t1?'selected':''}" style="flex:1" onclick="setBracketWinner('${mid}','${esc(m.t1||'')}')">${m.t1}</button>`:''}
         ${m.t2?`<button class="pred-winner-btn ${m.winner===m.t2?'selected':''}" style="flex:1" onclick="setBracketWinner('${mid}','${esc(m.t2||'')}')">${m.t2}</button>`:''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--muted)">⏰ Cierre automático:</label>
+        <input class="deadline-input" type="datetime-local" value="${mdtVal}" onchange="setMatchDeadline('${mid}',this.value)">
+        <button class="btn ${matchLocked?'btn-success':'btn-warn'}" style="padding:4px 10px;font-size:11px" onclick="toggleMatchDeadline('${mid}')">
+          ${matchLocked?'🔓 Reabrir':'🔒 Cerrar ahora'}
+        </button>
       </div>
     </div>`;
   });
@@ -978,6 +1057,21 @@ async function saveBracketAdmin(){
   else showMsg('❌ Error al guardar','error');
   if(btn){btn.disabled=false;btn.innerHTML='💾 Guardar bracket';}
 }
+async function setMatchDeadline(mid,val){
+  if(!bracket.deadlines[mid])bracket.deadlines[mid]={};
+  bracket.deadlines[mid].datetime=val||null;
+  await saveBracket();
+  showMsg('⏰ Cierre automático del partido configurado','info',2000);
+}
+
+async function toggleMatchDeadline(mid){
+  if(!bracket.deadlines[mid])bracket.deadlines[mid]={};
+  bracket.deadlines[mid].closed=!bracket.deadlines[mid].closed;
+  await saveBracket();
+  showMsg(`Partido ${bracket.deadlines[mid].closed?'cerrado':'reabierto'}`,'info',1800);
+  render();
+}
+
 async function setBracketDeadline(rkey,val){
   if(!bracket.deadlines[rkey])bracket.deadlines[rkey]={};
   bracket.deadlines[rkey].datetime=val||null;
@@ -1003,6 +1097,12 @@ async function toggleMatch(k,val){
 async function toggleAllMatches(val){
   Object.keys(GRUPOS).forEach(g=>{
     GRUPOS[g].matches.forEach((_,i)=>{config.visibleMatches[mk(g,i)]=val;});
+  });
+  ROUNDS.forEach(r=>{
+    ROUND_MATCHES[r.key].forEach(mid=>{
+      const m=getMatch(mid);
+      if(m.t1||m.t2) config.visibleMatches[mid]=val;
+    });
   });
   await saveConfig();
   render();
