@@ -333,11 +333,10 @@ function calcBracketPoints(p){
   Object.keys(bp).forEach(mid=>{
     const pred=bp[mid];
     const real=bracket.rounds[mid];
-    if(!pred||!real||!real.winner||real.s1===''||real.s2==='')return;
+    if(!pred||!real||real.s1===''||real.s2==='')return;
     const pa=+pred.s1,pb=+pred.s2,ra=+real.s1,rb=+real.s2;
     if(pa===ra&&pb===rb){pts+=PTS_SCORE;}
     else{const pr=pa>pb?1:pa<pb?-1:0,rr=ra>rb?1:ra<rb?-1:0;if(pr===rr)pts+=PTS_RESULT;}
-    if(pred.winner&&pred.winner===real.winner)pts+=PTS_RESULT;
   });
   return pts;
 }
@@ -358,19 +357,17 @@ function calcPoints(p){
       else{const pr=pa>pb?1:pa<pb?-1:0,rr=ra>rb?1:ra<rb?-1:0;if(pr===rr){pts+=PTS_RESULT;resultados++;}}
     });
   });
-  // Bracket phase points
+  // Bracket phase points — solo marcador, el ganador es informativo
   const bp=p.bpreds||{};
   Object.keys(bp).forEach(mid=>{
     const pred=bp[mid];
     const real=bracket.rounds[mid];
-    if(!pred||!real||!real.winner||real.s1===''||real.s2==='')return;
+    if(!pred||!real||real.s1===''||real.s2==='')return;
     const pa=+pred.s1,pb=+pred.s2,ra=+real.s1,rb=+real.s2;
     if(pa===ra&&pb===rb){pts+=PTS_SCORE;exactos++;}
     else{const pr=pa>pb?1:pa<pb?-1:0,rr=ra>rb?1:ra<rb?-1:0;if(pr===rr){pts+=PTS_RESULT;resultados++;}}
-    if(pred.winner&&pred.winner===real.winner){pts+=PTS_RESULT;resultados++;}
   });
   // Campeón bonus — independiente, se suma al final sin importar nada más
-  // Solo se aplica cuando el admin ya definió el campeón real (config.champion)
   const champBonus=(p.champion&&config.champion&&p.champion===config.champion)?PTS_CHAMP:0;
   return{pts:pts+champBonus,exactos,resultados,champBonus};
 }
