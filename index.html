@@ -773,10 +773,10 @@ async function renderBracket(){
           <input class="pred-score" type="number" min="0" max="99" value="${pred.s2}" ${matchLocked?'disabled':''} oninput="setBP('${mid}','s2',this.value)">
           <span class="pred-team">${t2}</span>
         </div>
-        <div class="pred-winner-label">¿Quién avanza?</div>
-        <div class="pred-winner-grid">
-          <button class="pred-winner-btn ${pred.winner===t1?'selected':''}" ${matchLocked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t1)}')">${t1}</button>
-          <button class="pred-winner-btn ${pred.winner===t2?'selected':''}" ${matchLocked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t2)}')">${t2}</button>
+        <div class="pred-winner-label">¿Quién avanza? <span id="winner-ind-${mid}" style="font-weight:700;color:var(--green)">${pred.winner?'✅ '+pred.winner:''}</span></div>
+        <div class="pred-winner-grid" id="winner-${mid}">
+          <button class="pred-winner-btn ${pred.winner===t1?'selected':''}" data-team="${t1}" ${matchLocked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t1)}')">${t1}</button>
+          <button class="pred-winner-btn ${pred.winner===t2?'selected':''}" data-team="${t2}" ${matchLocked?'disabled':''} onclick="setBPW('${esc(mid)}','${esc(t2)}')">${t2}</button>
         </div>
       </div>`;
     });
@@ -801,8 +801,22 @@ function setBPW(mid,team){
   if(!participants[editingName].bpreds)participants[editingName].bpreds={};
   if(!participants[editingName].bpreds[mid])participants[editingName].bpreds[mid]={s1:'',s2:'',winner:''};
   const cur=participants[editingName].bpreds[mid].winner;
-  participants[editingName].bpreds[mid].winner=cur===team?'':team;
-  render();
+  const newWinner=cur===team?'':team;
+  participants[editingName].bpreds[mid].winner=newWinner;
+
+  // Update only the winner buttons in DOM, no full re-render
+  const container=document.getElementById('winner-'+mid);
+  if(container){
+    container.querySelectorAll('.pred-winner-btn').forEach(btn=>{
+      btn.classList.toggle('selected', btn.dataset.team===newWinner);
+    });
+  }
+  // Update visual indicator
+  const ind=document.getElementById('winner-ind-'+mid);
+  if(ind){
+    ind.textContent=newWinner?`✅ ${newWinner}` :'';
+    ind.style.color=newWinner?'var(--green)':'var(--muted)';
+  }
 }
 
 async function saveBP(){
