@@ -794,6 +794,41 @@ function setBP(mid,field,val){
   if(!participants[editingName].bpreds)participants[editingName].bpreds={};
   if(!participants[editingName].bpreds[mid])participants[editingName].bpreds[mid]={s1:'',s2:'',winner:''};
   participants[editingName].bpreds[mid][field]=val;
+
+  // Auto-select winner if score is not a draw
+  const pred=participants[editingName].bpreds[mid];
+  const s1=pred.s1!==''?+pred.s1:null;
+  const s2=pred.s2!==''?+pred.s2:null;
+  if(s1!==null&&s2!==null&&s1!==s2){
+    // Get team names from DOM
+    const container=document.getElementById('winner-'+mid);
+    if(container){
+      const btns=container.querySelectorAll('.pred-winner-btn');
+      if(btns.length===2){
+        const t1=btns[0].dataset.team;
+        const t2=btns[1].dataset.team;
+        const autoWinner=s1>s2?t1:t2;
+        pred.winner=autoWinner;
+        // Update buttons visually
+        btns[0].classList.toggle('selected',autoWinner===t1);
+        btns[1].classList.toggle('selected',autoWinner===t2);
+        // Update indicator
+        const ind=document.getElementById('winner-ind-'+mid);
+        if(ind){ind.textContent=`✅ ${autoWinner}`;ind.style.color='var(--green)';}
+      }
+    }
+  } else if(s1!==null&&s2!==null&&s1===s2){
+    // Draw — clear auto-winner so user picks manually (unless already set)
+    // Only clear if it was auto-set (both scores just became equal)
+    const container=document.getElementById('winner-'+mid);
+    if(container){
+      const ind=document.getElementById('winner-ind-'+mid);
+      if(ind&&pred.winner){
+        // Keep existing manual selection, just show it
+        ind.textContent=pred.winner?`✅ ${pred.winner}`:'';
+      }
+    }
+  }
 }
 
 function setBPW(mid,team){
