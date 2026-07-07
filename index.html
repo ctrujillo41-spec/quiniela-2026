@@ -655,12 +655,14 @@ function renderBracketVisual(){
   let html=`<div class="bracket-wrap">
   <div style="display:flex;gap:2px;min-width:900px">`;
 
-  // LEFT SIDE: R16 (0-8), QF (0-4) only
-  const leftRounds=['R16','QF'];
-  const leftSplits={R16:[0,8],QF:[0,4]};
-  leftRounds.forEach(rk=>{
+  // LEFT SIDE: R16 (0-8), QF (0-4), SF (0-2)
+  const leftRounds=[
+    {rk:'R16', s:0, e:8},
+    {rk:'QF',  s:0, e:4},
+    {rk:'SF',  s:0, e:2},
+  ];
+  leftRounds.forEach(({rk,s,e})=>{
     const mids=ROUND_MATCHES[rk];
-    const [s,e]=leftSplits[rk];
     const rdef=ROUNDS.find(r=>r.key===rk);
     html+=`<div class="bracket-round">
       <div class="bracket-round-title">${rdef.label}</div>
@@ -670,11 +672,11 @@ function renderBracketVisual(){
     </div>`;
   });
 
-  // CENTER: SF_0, Final, 3P, SF_1
+  // CENTER: Semi_0, Final, 3P, Semi_1
   html+=`<div class="bracket-round" style="min-width:170px">
     <div class="bracket-round-title">Semifinal</div>
     <div class="bracket-matches" style="justify-content:flex-start;gap:4px;padding-top:20px">
-      ${bracketMatchCard('SF_0',0,false)}
+      ${bracketMatchCard('Semi_0',0,false)}
     </div>
     <div class="bracket-round-title" style="margin-top:8px">Final</div>
     <div class="bracket-matches" style="justify-content:center">
@@ -686,16 +688,18 @@ function renderBracketVisual(){
     </div>
     <div class="bracket-round-title" style="margin-top:8px">Semifinal</div>
     <div class="bracket-matches" style="justify-content:flex-end;gap:4px;padding-bottom:20px">
-      ${bracketMatchCard('SF_1',1,false)}
+      ${bracketMatchCard('Semi_1',1,false)}
     </div>
   </div>`;
 
-  // RIGHT SIDE: QF (4-8), R16 (8-16) — reversed order
-  const rightRounds=['QF','R16'];
-  const rightSplits={R16:[8,16],QF:[4,8]};
-  rightRounds.forEach(rk=>{
+  // RIGHT SIDE: SF (2-4), QF (4-8), R16 (8-16)
+  const rightRounds=[
+    {rk:'SF',  s:2, e:4},
+    {rk:'QF',  s:4, e:8},
+    {rk:'R16', s:8, e:16},
+  ];
+  rightRounds.forEach(({rk,s,e})=>{
     const mids=ROUND_MATCHES[rk];
-    const [s,e]=rightSplits[rk];
     const rdef=ROUNDS.find(r=>r.key===rk);
     html+=`<div class="bracket-round">
       <div class="bracket-round-title">${rdef.label}</div>
