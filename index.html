@@ -527,17 +527,63 @@ function setPS(k,side,val){
 
 function setChampP(t){participants[editingName].champion=participants[editingName].champion===t?'':t;render();}
 
+async function checkJornadaOpen(scores){
+  const{data}=await sb.from('quiniela_config').select('deadlines,closed').eq('id',1).single();
+  if(!data)return{open:true};
+  if(data.closed)return{open:false,reason:'La quiniela está cerrada.'};
+  const dl=data.deadlines||{};
+  const JORNADA_IDX=[[0,1],[2,3],[4,5]];
+  for(let j=0;j<3;j++){
+    const d=dl[j]||{};
+    const expired=d.datetime&&new Date()>=new Date(d.datetime);
+    const closed=d.closed===true;
+    if(closed||expired){
+      const idxs=JORNADA_IDX[j];
+      const blocked=Object.keys(scores).filter(k=>{
+        const idx=parseInt(k.split('_')[1]);
+        return idxs.includes(idx);
+      });
+      if(blocked.length>0)return{open:false,reason:`La Jornada ${j+1} ya está cerrada.`};
+    }
+  }
+  return{open:true};
+}
+
+async function checkBracketOpen(bpreds){
+  const{data}=await sb.from('quiniela_bracket').select('deadlines').eq('id',1).single();
+  if(!data)return{open:true};
+  const dl=data.deadlines||{};
+  const blocked=[];
+  Object.keys(bpreds).forEach(mid=>{
+    const rkey=mid.replace(/_\d+$/,'');
+    const md=dl[mid];
+    if(md){
+      if(md.closed===true){blocked.push(mid);return;}
+      if(md.datetime&&new Date()>=new Date(md.datetime)){blocked.push(mid);return;}
+    }
+    const rd=dl[rkey];
+    if(rd){
+      if(rd.closed===true){blocked.push(mid);return;}
+      if(rd.datetime&&new Date()>=new Date(rd.datetime)){blocked.push(mid);return;}
+    }
+  });
+  return{open:blocked.length===0,blocked};
+}
+
 async function savePart(){
   const btn=document.getElementById('save-btn');
-  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Guardando...';}
-  const ok=await saveParticipant(editingName);
-  if(ok){
-    showMsg('✅ Pronósticos guardados correctamente','success');
-    setTimeout(()=>{setMode('home');},1800);
-  }else{
-    showMsg('❌ Error al guardar. Intenta de nuevo.','error');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Verificando...';}
+  const p=participants[editingName];
+  const{open,reason}=await checkJornadaOpen(p.scores||{});
+  if(!open){
+    showMsg(`🔒 ${reason} No se pueden guardar cambios en partidos cerrados.`,'error',5000);
     if(btn){btn.disabled=false;btn.innerHTML='💾 Guardar todos mis pronósticos';}
+    return;
   }
+  if(btn)btn.innerHTML='<span class="spinner"></span>Guardando...';
+  const ok=await saveParticipant(editingName);
+  if(ok){showMsg('✅ Pronósticos guardados correctamente','success');setTimeout(()=>{setMode('home');},1800);}
+  else{showMsg('❌ Error al guardar. Intenta de nuevo.','error');if(btn){btn.disabled=false;btn.innerHTML='💾 Guardar todos mis pronósticos';}}
 }
 
 async function renderRanking(){
@@ -876,7 +922,15 @@ function setBPW(mid,team){
 
 async function saveBP(){
   const btn=document.getElementById('save-bp-btn');
-  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Guardando...';}
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Verificando...';}
+  const p=participants[editingName];
+  const{open,blocked}=await checkBracketOpen(p.bpreds||{});
+  if(!open){
+    showMsg(`🔒 No se puede guardar — ${blocked.length} partido(s) ya cerrado(s). Recarga la página.`,'error',5000);
+    if(btn){btn.disabled=false;btn.innerHTML='💾 Guardar pronósticos de fase final';}
+    return;
+  }
+  if(btn)btn.innerHTML='<span class="spinner"></span>Guardando...';
   const ok=await saveParticipant(editingName);
   if(ok)showMsg('✅ Pronósticos de fase final guardados','success');
   else showMsg('❌ Error al guardar','error');
