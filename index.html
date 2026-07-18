@@ -924,9 +924,15 @@ async function saveBP(){
   const btn=document.getElementById('save-bp-btn');
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Verificando...';}
   const p=participants[editingName];
-  const{open,blocked}=await checkBracketOpen(p.bpreds||{});
+
+  // Only check deadlines for the current round being saved
+  const currentMids=ROUND_MATCHES[bracketRound]||[];
+  const currentPreds={};
+  currentMids.forEach(mid=>{if(p.bpreds&&p.bpreds[mid])currentPreds[mid]=p.bpreds[mid];});
+
+  const{open,blocked}=await checkBracketOpen(currentPreds);
   if(!open){
-    showMsg(`🔒 No se puede guardar — ${blocked.length} partido(s) ya cerrado(s). Recarga la página.`,'error',5000);
+    showMsg(`🔒 Esta ronda ya está cerrada. No se pueden guardar cambios.`,'error',5000);
     if(btn){btn.disabled=false;btn.innerHTML='💾 Guardar pronósticos de fase final';}
     return;
   }
